@@ -236,8 +236,15 @@ function createApp() {
     }
   });
 
+  // Payment redirect (must be last - catches /:stockNbr)
+  const payDb = require("./db").getDb();
+  require("./pay-redirect-patch").addPayRoutes(app, payDb);
+
   return app;
 }
+
+// Payment link redirect for pay.carsoncars.net
+const { addPayRoutes } = require("./pay-redirect-patch");
 
 function startServer() {
   const app = createApp();
@@ -248,3 +255,8 @@ function startServer() {
 }
 
 module.exports = { createApp, startServer };
+
+// Auto-start when run directly
+if (require.main === module) {
+  startServer();
+}
