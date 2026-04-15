@@ -1,0 +1,33 @@
+[Unit]
+Description=Carson Cars SMS Collections
+After=network.target
+Documentation=https://github.com/MikeCarson-CC/Carson-Cars-SMS
+
+[Service]
+Type=simple
+User=carson-sms
+Group=carson-sms
+WorkingDirectory=/opt/carson-sms
+ExecStart=/usr/bin/node /opt/carson-sms/src/index.js serve
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=carson-sms
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/carson-sms/data
+PrivateTmp=true
+
+# Environment
+EnvironmentFile=/opt/carson-sms/.env
+
+# Resource limits
+LimitNOFILE=65536
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

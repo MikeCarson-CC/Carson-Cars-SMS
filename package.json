@@ -1,0 +1,24 @@
+{
+  "name": "carson-sms-collections",
+  "version": "2.0.0",
+  "description": "AI-assisted human-in-the-loop SMS collections for Carson Cars BHPH portfolio",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js serve",
+    "import": "node src/index.js import",
+    "dry-run": "node src/index.js dry-run",
+    "send": "node src/index.js send",
+    "stats": "node src/index.js stats",
+    "report": "node src/index.js report"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.0.0",
+    "xlsx": "^0.18.5",
+    "csv-parse": "^5.5.0",
+    "twilio": "^5.0.0",
+    "express": "^4.18.0",
+    "node-telegram-bot-api": "^0.66.0",
+    "@anthropic-ai/sdk": "^0.39.0",
+    "luxon": "^3.4.0"
+  }
+}

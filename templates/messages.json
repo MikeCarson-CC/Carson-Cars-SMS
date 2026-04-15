@@ -1,0 +1,30 @@
+{
+  "persona": "Maria from Carson Cars",
+  "templateA": {
+    "name": "First Touch",
+    "description": "Everyone eligible gets this once",
+    "template": "Hi {{firstName}}, this is Maria from Carson Cars about your {{make}} loan, account #{{stockNbr}}. Just reply and I'll help you out, or pay at Pay.CarsonCars.Net/{{stockNbr}}.\nReply STOP to opt out.",
+    "templateNoMake": "Hi {{firstName}}, this is Maria from Carson Cars about your loan, account #{{stockNbr}}. Just reply and I'll help you out, or pay at Pay.CarsonCars.Net/{{stockNbr}}.\nReply STOP to opt out."
+  },
+  "templateB": {
+    "name": "Follow-up",
+    "description": "7+ days after Template A, no reply, no payment",
+    "template": "Hi {{firstName}}, Maria at Carson Cars again — still haven't heard back on your {{make}} loan, account #{{stockNbr}}. Reply here, call (425) 697-6969, or pay at Pay.CarsonCars.Net/{{stockNbr}}.\nReply STOP to opt out.",
+    "templateNoMake": "Hi {{firstName}}, Maria at Carson Cars again — still haven't heard back on your loan, account #{{stockNbr}}. Reply here, call (425) 697-6969, or pay at Pay.CarsonCars.Net/{{stockNbr}}.\nReply STOP to opt out."
+  },
+  "templateD": {
+    "name": "Broken Promise",
+    "description": "Sent when a payment commitment passes promised_date + 1 business day without payment",
+    "template": "Hi {{firstName}}, Maria at Carson Cars — looks like the payment you mentioned for {{PromisedDate}} on account #{{stockNbr}} hasn't hit yet. Everything ok? Reply here or pay at Pay.CarsonCars.Net/{{stockNbr}}.\nReply STOP to opt out.",
+    "templateNoMake": "Hi {{firstName}}, Maria at Carson Cars — looks like the payment you mentioned for {{PromisedDate}} on account #{{stockNbr}} hasn't hit yet. Everything ok? Reply here or pay at Pay.CarsonCars.Net/{{stockNbr}}.\nReply STOP to opt out."
+  },
+  "holdingReply": {
+    "name": "Holding Reply",
+    "description": "Auto-sent if no human reviews draft within 15 minutes",
+    "template": "Hi {{firstName}}, this is Maria at Carson Cars — I got your message and someone from our team will respond shortly."
+  },
+  "optOutConfirmation": {
+    "name": "Opt-Out Confirmation",
+    "template": "You've been opted out of Carson Cars text messages. If you need help with your account, call us at (425) 697-6969."
+  }
+}

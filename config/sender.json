@@ -1,0 +1,9 @@
+{
+  "twilioFromNumber": "+14256968488",
+  "officePhone": "(425) 697-6969",
+  "paymentLinkBase": "Pay.CarsonCars.Net",
+  "paymentRedirectUrl": "https://www.eautopayment.com/Registration?merchantAccountId=1503-2413-1611",
+  "optOutConfirmation": "You've been opted out of Carson Cars text messages. If you need help with your account, call us at (425) 697-6969.",
+  "holdingReply": "Hi {{firstName}}, this is Maria at Carson Cars — I got your message and someone from our team will respond shortly.",
+  "holdingReplyDelayMinutes": 15
+}

@@ -1,0 +1,26 @@
+{
+  "excludedStatuses": ["repo", "charged_off", "paid_off", "BK", "legal_hold"],
+  "excludeFlags": {
+    "bk_flag": true,
+    "repo_flag": true,
+    "legal_hold_flag": true,
+    "payment_plan_flag": true,
+    "do_not_contact_flag": true
+  },
+  "hardcodedExclusions": {
+    "litigation": [
+      {
+        "name": "Banks v. Carson Cars",
+        "caseNumber": "24-2-04734-31",
+        "customerIds": []
+      }
+    ],
+    "trespass": [
+      {
+        "name": "Christopher Lundquist / Max Bladez",
+        "customerIds": []
+      }
+    ]
+  },
+  "notes": "Add DealPack CustomerNbr or StockNbr to customerIds arrays above to hardcode-exclude specific customers."
+}
