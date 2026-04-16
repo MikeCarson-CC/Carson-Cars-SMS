@@ -10,7 +10,7 @@ const logger = require('./logger');
 const db = require('./db');
 const voiceRoutes = require('./voiceRoutes');
 const { sendDailySummary } = require('./dailySummary');
-const { getBot } = require('./telegram');
+const { getBot, setupWebhook, processUpdate } = require('./telegram');
 
 // Ensure directories exist
 const DIRS = [
@@ -29,7 +29,7 @@ db.getDb();
 // Initialize Express
 const app = express();
 
-// Trust proxy (for Twilio's X-Forwarded-For)
+// Trust proxy
 app.set('trust proxy', true);
 
 // Body parsing
@@ -38,10 +38,12 @@ app.use(express.json());
 
 // Request logging middleware
 app.use((req, res, next) => {
-  logger.info(`${req.method} ${req.path}`, {
-    ip: req.ip,
-    userAgent: req.headers['user-agent']?.slice(0, 80),
-  });
+  if (req.path !== '/health') {
+    logger.info(`${req.method} ${req.path}`, {
+      ip: req.ip,
+      userAgent: req.headers['user-agent']?.slice(0, 80),
+    });
+  }
   next();
 });
 
@@ -59,6 +61,16 @@ app.get('/health', (req, res) => {
 
 // Twilio voice webhooks
 app.use('/voice', voiceRoutes);
+
+// Telegram webhook endpoint (receives updates from Telegram)
+app.post('/telegram/webhook', async (req, res) => {
+  res.sendStatus(200); // Always respond fast
+  try {
+    await processUpdate(req.body);
+  } catch (err) {
+    logger.error('Telegram webhook error', { error: err.message });
+  }
+});
 
 // Admin: list recent voicemails (local access only)
 app.get('/admin/voicemails', (req, res) => {
@@ -91,7 +103,8 @@ app.use((err, req, res, next) => {
 // ─── Telegram Bot ─────────────────────────────────────────────────────────────
 if (config.TELEGRAM_BOT_TOKEN) {
   try {
-    getBot(); // Initialize with polling
+    getBot(); // Initialize in webhook mode (no polling)
+    // Register webhook after server starts (see below)
   } catch (err) {
     logger.error('Telegram bot init failed', { error: err.message });
   }
@@ -101,7 +114,7 @@ if (config.TELEGRAM_BOT_TOKEN) {
 
 // ─── Daily Summary Cron ───────────────────────────────────────────────────────
 // 6 AM Pacific = 14:00 UTC (non-DST) / 13:00 UTC (DST)
-// Use 14:00 UTC as stable anchor (slightly off during DST, but close enough)
+// Using 14:00 UTC as stable anchor
 cron.schedule('0 14 * * *', () => {
   logger.info('Daily summary cron triggered');
   sendDailySummary().catch(err => {
@@ -111,13 +124,22 @@ cron.schedule('0 14 * * *', () => {
 
 // ─── Start Server ─────────────────────────────────────────────────────────────
 const PORT = config.PORT;
-app.listen(PORT, '0.0.0.0', () => {
-  logger.info(`Carson Voicemail service started`, {
+app.listen(PORT, '0.0.0.0', async () => {
+  logger.info('Carson Voicemail service started', {
     port: PORT,
     webhookBase: config.WEBHOOK_BASE_URL,
     smsEnabled: config.SMS_REPLIES_ENABLED,
     telegramConfigured: !!config.TELEGRAM_BOT_TOKEN,
   });
+
+  // Register Telegram webhook
+  if (config.TELEGRAM_BOT_TOKEN) {
+    try {
+      await setupWebhook(config.WEBHOOK_BASE_URL);
+    } catch (err) {
+      logger.error('Telegram webhook setup failed', { error: err.message });
+    }
+  }
 });
 
 // ─── Graceful shutdown ────────────────────────────────────────────────────────
