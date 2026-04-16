@@ -1,0 +1,24 @@
+{
+  "name": "carson-voicemail",
+  "version": "1.0.0",
+  "description": "Carson Cars voicemail processing service — 6-line Twilio integration with Whisper transcription and Claude analysis",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "axios": "^1.7.0",
+    "better-sqlite3": "^9.4.0",
+    "dotenv": "^16.4.0",
+    "express": "^4.19.0",
+    "form-data": "^4.0.0",
+    "node-cron": "^3.0.3",
+    "node-telegram-bot-api": "^0.66.0",
+    "openai": "^4.47.0",
+    "twilio": "^5.3.0",
+    "winston": "^3.13.0",
+    "winston-daily-rotate-file": "^5.0.0"
+  }
+}
