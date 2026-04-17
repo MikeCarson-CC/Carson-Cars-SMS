@@ -28,6 +28,15 @@ router.post('/incoming', (req, res) => {
 
     logger.info('Incoming call', { callSid, to, from, callerName, line: sourceName });
 
+    // Reject blocked numbers — no greeting, no recording, no cost
+    if (from && db.isBlocked(from)) {
+      logger.info('Blocked number — rejecting', { callSid, from });
+      const rejectTwiml = new VoiceResponse();
+      rejectTwiml.reject({ reason: 'busy' });
+      res.type('text/xml');
+      return res.send(rejectTwiml.toString());
+    }
+
     // Log initial record in DB (we'll update with transcript later)
     db.insertVoicemail({
       twilio_call_sid: callSid,

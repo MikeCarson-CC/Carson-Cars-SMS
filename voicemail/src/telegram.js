@@ -122,6 +122,23 @@ async function handleCallbackQuery(query) {
       await b.answerCallbackQuery(query.id, { text: 'Type your custom reply...' });
       await b.sendMessage(chatId, `✏️ *Type your custom reply* to ${vm.caller_number}:\n_(Just type it and send)_`, { parse_mode: 'Markdown' });
 
+    } else if (data.startsWith('block:')) {
+      const callSid = data.replace('block:', '');
+      const vm = db.getVoicemailBySid(callSid);
+      if (!vm || !vm.caller_number) {
+        await b.answerCallbackQuery(query.id, { text: 'Cannot block — no caller number.' });
+        return;
+      }
+      db.blockNumber(vm.caller_number, `Blocked via Telegram ${new Date().toISOString()}`);
+      db.updateVoicemail(callSid, { action_taken: 'blocked' });
+      await b.answerCallbackQuery(query.id, { text: `Blocked ${vm.caller_number}` });
+      await b.editMessageReplyMarkup({ inline_keyboard: [] }, { chat_id: chatId, message_id: messageId });
+      await b.sendMessage(chatId,
+        `🚫 *${escapeMarkdown(vm.caller_number)} blocked*\nFuture calls silently rejected\.`,
+        { parse_mode: 'MarkdownV2' }
+      );
+      logger.info('Number blocked', { callSid, phone: vm.caller_number });
+
     } else if (data.startsWith('notspam:')) {
       const callSid = data.replace('notspam:', '');
       const vm = db.getVoicemailBySid(callSid);
@@ -277,6 +294,7 @@ function buildButtons(callSid, smartReplies) {
     { text: '✏️ Edit', callback_data: `edit:${callSid}` },
     { text: '🚨 Escalate', callback_data: `escalate:${callSid}` },
     { text: '🗑️ Delete', callback_data: `delete:${callSid}` },
+    { text: '🚫 Block', callback_data: `block:${callSid}` },
   ]);
 
   return { inline_keyboard: buttons };

@@ -45,6 +45,14 @@ function initSchema() {
       created_at TEXT DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS blocked_numbers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      phone TEXT UNIQUE NOT NULL,
+      blocked_by TEXT DEFAULT 'manual',
+      blocked_at TEXT DEFAULT (datetime('now')),
+      note TEXT
+    );
+
     CREATE INDEX IF NOT EXISTS idx_voicemails_call_sid ON voicemails(twilio_call_sid);
     CREATE INDEX IF NOT EXISTS idx_voicemails_category ON voicemails(category);
     CREATE INDEX IF NOT EXISTS idx_voicemails_created_at ON voicemails(created_at);
@@ -111,8 +119,33 @@ function getPendingVoicemails() {
   `).all();
 }
 
+
+function isBlocked(phone) {
+  const d = getDb();
+  return !!d.prepare('SELECT 1 FROM blocked_numbers WHERE phone = ?').get(phone);
+}
+
+function blockNumber(phone, note) {
+  const d = getDb();
+  d.prepare('INSERT OR IGNORE INTO blocked_numbers (phone, note) VALUES (?, ?)').run(phone, note || '');
+}
+
+function unblockNumber(phone) {
+  const d = getDb();
+  d.prepare('DELETE FROM blocked_numbers WHERE phone = ?').run(phone);
+}
+
+function getBlockedNumbers() {
+  const d = getDb();
+  return d.prepare('SELECT * FROM blocked_numbers ORDER BY blocked_at DESC').all();
+}
+
 module.exports = {
   getDb,
+  isBlocked,
+  blockNumber,
+  unblockNumber,
+  getBlockedNumbers,
   insertVoicemail,
   updateVoicemail,
   getVoicemailBySid,

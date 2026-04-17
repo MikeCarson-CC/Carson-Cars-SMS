@@ -89,6 +89,11 @@ app.post('/admin/daily-summary', async (req, res) => {
   sendDailySummary().catch(logger.error.bind(logger));
 });
 
+// Admin: view/manage blocked numbers
+app.get('/admin/blocked', (req, res) => {
+  const blocked = db.getBlockedNumbers();
+  res.json({ count: blocked.length, blocked });
+
 // 404 handler
 app.use((req, res) => {
   res.status(404).json({ error: 'Not found' });
@@ -111,6 +116,16 @@ if (config.TELEGRAM_BOT_TOKEN) {
 } else {
   logger.warn('TELEGRAM_BOT_TOKEN not set — Telegram notifications disabled');
 }
+
+
+});
+
+app.delete('/admin/blocked/:phone', (req, res) => {
+  const phone = decodeURIComponent(req.params.phone);
+  db.unblockNumber(phone);
+  logger.info('Number unblocked via admin', { phone });
+  res.json({ ok: true, phone });
+});
 
 // ─── Daily Summary Cron ───────────────────────────────────────────────────────
 // 6 AM Pacific — uses timezone option so it always fires at 6 AM PT regardless of DST

@@ -116,6 +116,13 @@ async function analyzeWithHaiku(transcript, sourceLine, callSid) {
 async function processRecording({ callSid, recordingUrl, sourceLine, twilioNumber, callerNumber, callerName, timestampUtc }) {
   logger.info('Processing recording', { callSid, sourceLine, callerNumber });
 
+  // Skip blocked numbers
+  if (callerNumber && db.isBlocked(callerNumber)) {
+    logger.info('Blocked number — skipping', { callSid, callerNumber });
+    db.updateVoicemail(callSid, { action_taken: 'blocked' });
+    return;
+  }
+
   let localPath = null;
 
   try {
