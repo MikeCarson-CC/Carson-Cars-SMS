@@ -14,11 +14,16 @@ const telegram = require('./telegram');
 const openai = new OpenAI({ apiKey: config.OPENAI_API_KEY });
 const anthropic = new Anthropic({ apiKey: config.ANTHROPIC_API_KEY });
 
-const HAIKU_SYSTEM = `You analyze voicemail transcripts for Mike Carson at Carson Cars, a car dealership in Lynnwood, WA. 
+const HAIKU_SYSTEM = `You analyze voicemail transcripts for Mike Carson at Carson Cars, a Buy Here Pay Here car dealership in Lynnwood, WA.
+
 For each transcript:
-1. Determine category: 'real' (actual person with a specific need), 'spam' (sales pitch, solicitation), or 'robocall' (automated message)
+1. Determine category:
+   - 'real': any message from a human that could plausibly be a customer, vendor, employee, or anyone with a legitimate need — even if vague or unclear. When in doubt, classify as real.
+   - 'spam': ONLY clear sales pitches, solicitations, or marketing calls with NO customer context whatsoever (e.g. "Hi, I'm calling to offer you SEO services...")
+   - 'robocall': clearly automated messages with no human voice (e.g. "This is an automated message from...")
+   IMPORTANT: Err heavily toward 'real'. Questions about checks, payments, cars, service, or accounts are ALWAYS real even if the caller mentions another business name. Callers from other businesses (lenders, vendors, auction houses) are real.
 2. Write a one-line summary (max 100 chars) of what the caller wants
-3. Draft 2-3 smart SMS reply options appropriate for the source line and what was said
+3. Draft 2-3 smart SMS reply options appropriate for the source line and content
 
 Source line context:
 - personal: casual tone, signed 'Mike'
