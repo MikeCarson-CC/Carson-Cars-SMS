@@ -129,7 +129,7 @@ app.delete('/admin/blocked/:phone', (req, res) => {
 
 
 // ─── Weekly Recording Cleanup (Sunday 2 AM PT) ────────────────────────────────
-// Deletes recordings + DB records older than 12 months (except escalated)
+// Deletes recordings + DB records older than 48 months (except escalated)
 cron.schedule('0 2 * * 0', () => {
   logger.info('Weekly cleanup cron triggered');
   try {
@@ -157,7 +157,7 @@ cron.schedule('0 2 * * 0', () => {
       const bot = tg.getBot();
       if (bot) {
         bot.sendMessage(config.TELEGRAM_MIKE_USER_ID,
-          `🗑️ Weekly cleanup: deleted ${deleted} voicemail${deleted !== 1 ? 's' : ''} older than 12 months.`
+          `🗑️ Weekly cleanup: deleted ${deleted} voicemail${deleted !== 1 ? 's' : ''} older than 48 months.`
         ).catch(() => {});
       }
     }

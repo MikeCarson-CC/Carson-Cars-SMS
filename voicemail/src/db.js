@@ -157,11 +157,11 @@ function searchVoicemails(query) {
 
 function getExpiredVoicemails() {
   const d = getDb();
-  // Older than 12 months, not escalated
+  // Older than 48 months (4 years, WA SOL), not escalated
   return d.prepare(`
     SELECT twilio_call_sid, recording_local_path 
     FROM voicemails
-    WHERE created_at < datetime('now', '-12 months')
+    WHERE created_at < datetime('now', '-48 months')
       AND action_taken != 'escalated'
   `).all();
 }
