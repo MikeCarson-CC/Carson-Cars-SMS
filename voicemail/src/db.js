@@ -140,12 +140,46 @@ function getBlockedNumbers() {
   return d.prepare('SELECT * FROM blocked_numbers ORDER BY blocked_at DESC').all();
 }
 
+
+function searchVoicemails(query) {
+  const d = getDb();
+  const q = '%' + query + '%';
+  return d.prepare(`
+    SELECT * FROM voicemails
+    WHERE caller_number LIKE ? 
+       OR caller_name LIKE ?
+       OR transcript LIKE ?
+       OR summary LIKE ?
+    ORDER BY timestamp_utc DESC
+    LIMIT 10
+  `).all(q, q, q, q);
+}
+
+function getExpiredVoicemails() {
+  const d = getDb();
+  // Older than 12 months, not escalated
+  return d.prepare(`
+    SELECT twilio_call_sid, recording_local_path 
+    FROM voicemails
+    WHERE created_at < datetime('now', '-12 months')
+      AND action_taken != 'escalated'
+  `).all();
+}
+
+function deleteVoicemailRecord(callSid) {
+  const d = getDb();
+  d.prepare('DELETE FROM voicemails WHERE twilio_call_sid = ?').run(callSid);
+}
+
 module.exports = {
   getDb,
   isBlocked,
   blockNumber,
   unblockNumber,
   getBlockedNumbers,
+  searchVoicemails,
+  getExpiredVoicemails,
+  deleteVoicemailRecord,
   insertVoicemail,
   updateVoicemail,
   getVoicemailBySid,

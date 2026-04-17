@@ -127,6 +127,45 @@ app.delete('/admin/blocked/:phone', (req, res) => {
   res.json({ ok: true, phone });
 });
 
+
+// ─── Weekly Recording Cleanup (Sunday 2 AM PT) ────────────────────────────────
+// Deletes recordings + DB records older than 12 months (except escalated)
+cron.schedule('0 2 * * 0', () => {
+  logger.info('Weekly cleanup cron triggered');
+  try {
+    const expired = db.getExpiredVoicemails();
+    let deleted = 0;
+    for (const vm of expired) {
+      // Delete the MP3 file if it exists
+      if (vm.recording_local_path) {
+        try {
+          const fs = require('fs');
+          if (fs.existsSync(vm.recording_local_path)) {
+            fs.unlinkSync(vm.recording_local_path);
+          }
+        } catch (fileErr) {
+          logger.warn('Could not delete recording file', { path: vm.recording_local_path, error: fileErr.message });
+        }
+      }
+      // Delete DB record
+      db.deleteVoicemailRecord(vm.twilio_call_sid);
+      deleted++;
+    }
+    logger.info('Weekly cleanup complete', { deleted, checked: expired.length });
+    if (deleted > 0) {
+      const tg = require('./telegram');
+      const bot = tg.getBot();
+      if (bot) {
+        bot.sendMessage(config.TELEGRAM_MIKE_USER_ID,
+          `🗑️ Weekly cleanup: deleted ${deleted} voicemail${deleted !== 1 ? 's' : ''} older than 12 months.`
+        ).catch(() => {});
+      }
+    }
+  } catch (err) {
+    logger.error('Weekly cleanup error', { error: err.message });
+  }
+}, { timezone: 'America/Los_Angeles' });
+
 // ─── Daily Summary Cron ───────────────────────────────────────────────────────
 // 6 AM Pacific — uses timezone option so it always fires at 6 AM PT regardless of DST
 cron.schedule('0 6 * * *', () => {

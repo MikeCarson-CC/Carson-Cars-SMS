@@ -23,6 +23,7 @@ function getBot() {
     });
     setupCallbackHandlers();
     setupMessageHandlers();
+    setupSearchHandler(bot);
     logger.info('Telegram bot initialized (polling mode)');
   }
   return bot;
@@ -121,6 +122,35 @@ async function handleCallbackQuery(query) {
       editSessions.set(String(chatId), callSid);
       await b.answerCallbackQuery(query.id, { text: 'Type your custom reply...' });
       await b.sendMessage(chatId, `✏️ *Type your custom reply* to ${vm.caller_number}:\n_(Just type it and send)_`, { parse_mode: 'Markdown' });
+
+    } else if (data.startsWith('savecontact:')) {
+      const callSid = data.replace('savecontact:', '');
+      const vm = db.getVoicemailBySid(callSid);
+      if (!vm || !vm.caller_number) {
+        await b.answerCallbackQuery(query.id, { text: 'No caller number available.' });
+        return;
+      }
+      // Build vCard
+      const name = vm.caller_name || vm.caller_number;
+      const phone = vm.caller_number;
+      const vcard = [
+        'BEGIN:VCARD',
+        'VERSION:3.0',
+        `FN:${name}`,
+        `TEL;TYPE=CELL:${phone}`,
+        `NOTE:Voicemail received ${vm.timestamp_utc || ''} via Carson Voicemail`,
+        'END:VCARD',
+      ].join('\r\n');
+      const fileName = `${phone.replace(/[^0-9]/g, '')}.vcf`;
+      const vcfBuffer = Buffer.from(vcard, 'utf8');
+      await b.answerCallbackQuery(query.id, { text: '💾 Sending contact...' });
+      await b.sendDocument(chatId, vcfBuffer, {
+        caption: `Contact: ${name}`,
+      }, {
+        filename: fileName,
+        contentType: 'text/vcard',
+      });
+      logger.info('Save Contact: sent vCard', { callSid, phone });
 
     } else if (data.startsWith('block:')) {
       const callSid = data.replace('block:', '');
@@ -295,6 +325,7 @@ function buildButtons(callSid, smartReplies) {
     { text: '🚨 Escalate', callback_data: `escalate:${callSid}` },
     { text: '🗑️ Delete', callback_data: `delete:${callSid}` },
     { text: '🚫 Block', callback_data: `block:${callSid}` },
+    { text: '💾 Save Contact', callback_data: `savecontact:${callSid}` },
   ]);
 
   return { inline_keyboard: buttons };
@@ -371,4 +402,39 @@ async function sendAdminMessage(text) {
   }
 }
 
-module.exports = { getBot, setupWebhook, processUpdate, sendVoicemailCard, sendAdminMessage };
+
+function setupSearchHandler(b) {
+  b.onText(/^\/search (.+)$/, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from && msg.from.id;
+    if (String(userId) !== String(config.TELEGRAM_MIKE_USER_ID)) return;
+
+    const query = match[1].trim();
+    const results = db.searchVoicemails(query);
+
+    if (results.length === 0) {
+      await b.sendMessage(chatId, `No voicemails found for: *${escapeMarkdown(query)}*`, { parse_mode: 'MarkdownV2' });
+      return;
+    }
+
+    await b.sendMessage(chatId, `🔍 Found ${results.length} voicemail${results.length !== 1 ? 's' : ''} for *${escapeMarkdown(query)}*:`, { parse_mode: 'MarkdownV2' });
+
+    for (const vm of results) {
+      const callerDisplay = vm.caller_name ? `${vm.caller_name} (${vm.caller_number})` : vm.caller_number;
+      const time = vm.timestamp_utc ? vm.timestamp_utc.substring(0, 16).replace('T', ' ') + ' UTC' : 'Unknown time';
+      const text = `📞 *${escapeMarkdown(callerDisplay)}*\n` +
+        `🕐 ${escapeMarkdown(time)}\n` +
+        `📋 ${escapeMarkdown(vm.summary || 'No summary')}`;
+      const keyboard = { inline_keyboard: [] };
+      if (vm.recording_local_path) {
+        keyboard.inline_keyboard.push([
+          { text: '🎧 Listen', callback_data: `listen:${vm.twilio_call_sid}` },
+          { text: '💾 Save Contact', callback_data: `savecontact:${vm.twilio_call_sid}` },
+        ]);
+      }
+      await b.sendMessage(chatId, text, { parse_mode: 'MarkdownV2', reply_markup: keyboard });
+    }
+  });
+}
+
+module.exports = { getBot, setupWebhook, processUpdate, sendVoicemailCard, sendAdminMessage, setupSearchHandler };
