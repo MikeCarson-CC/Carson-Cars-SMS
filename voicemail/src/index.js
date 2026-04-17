@@ -113,14 +113,13 @@ if (config.TELEGRAM_BOT_TOKEN) {
 }
 
 // ─── Daily Summary Cron ───────────────────────────────────────────────────────
-// 6 AM Pacific = 14:00 UTC (non-DST) / 13:00 UTC (DST)
-// Using 14:00 UTC as stable anchor
-cron.schedule('0 14 * * *', () => {
+// 6 AM Pacific — uses timezone option so it always fires at 6 AM PT regardless of DST
+cron.schedule('0 6 * * *', () => {
   logger.info('Daily summary cron triggered');
   sendDailySummary().catch(err => {
     logger.error('Daily summary cron error', { error: err.message });
   });
-});
+}, { timezone: 'America/Los_Angeles' });
 
 // ─── Start Server ─────────────────────────────────────────────────────────────
 const PORT = config.PORT;

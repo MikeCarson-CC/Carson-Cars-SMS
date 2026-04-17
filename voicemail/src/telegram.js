@@ -101,7 +101,7 @@ async function handleCallbackQuery(query) {
         await b.sendMessage(chatId, `✅ Replied to ${vm.caller_number}:\n\n${replyText}`);
       } else {
         db.updateVoicemail(callSid, {
-          action_taken: 'replied',
+          action_taken: 'reply_queued',
           reply_sent_text: replyText,
           reply_sent_at: new Date().toISOString(),
         });
@@ -171,7 +171,7 @@ async function handleMessage(msg) {
       await b.sendMessage(chatId, `✅ Custom reply sent to ${vm.caller_number}:\n\n${text}`);
     } else {
       db.updateVoicemail(callSid, {
-        action_taken: 'replied',
+        action_taken: 'reply_queued',
         reply_sent_text: text,
         reply_sent_at: new Date().toISOString(),
       });

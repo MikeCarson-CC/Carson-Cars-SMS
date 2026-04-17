@@ -54,7 +54,6 @@ router.post('/incoming', (req, res) => {
     twiml.record({
       maxLength: 120,
       playBeep: true,
-      action: `${config.WEBHOOK_BASE_URL}/voice/recording`,
       method: 'POST',
       recordingStatusCallback: `${config.WEBHOOK_BASE_URL}/voice/recording`,
       recordingStatusCallbackMethod: 'POST',
@@ -79,6 +78,13 @@ router.post('/recording', async (req, res) => {
 
   try {
     const callSid = req.body.CallSid;
+    // Dedup: skip if already processed
+    const existingRecord = db.getVoicemailBySid(callSid);
+    if (existingRecord && existingRecord.transcript) {
+      logger.info('Duplicate recording callback, already processed', { callSid });
+      return res.status(200).send('');
+    }
+
     const recordingUrl = req.body.RecordingUrl;
     const recordingStatus = req.body.RecordingStatus;
     const recordingSid = req.body.RecordingSid;
