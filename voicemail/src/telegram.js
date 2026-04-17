@@ -7,8 +7,19 @@ const db = require('./db');
 
 let bot = null;
 
-// Tracks pending "Edit" sessions: userId → callSid
+// Tracks pending "Edit" sessions: userId → { type, id }
+// type: 'voicemail' (callSid) | 'sms' (sms_message_id)
 const editSessions = new Map();
+
+// Signature appended to FIRST outbound SMS per caller, keyed by source_line
+const FIRST_SMS_SIGNATURES = {
+  personal:        '\n- Mike Carson | mike@carsoncars.net',
+  ext111:          '\n- Mike Carson, Carson Cars | mike@carsoncars.net',
+  lynnwood_main:   '\n- Carson Cars | (425) 697-6969',
+  everett_main:    '\n- Carson Cars | (425) 697-6969',
+  service_mgr:     '\n- Carson Auto Repair | (425) 745-2299',
+  service_general: '\n- Carson Auto Repair | (425) 745-2299',
+};
 
 function getBot() {
   if (!bot && config.TELEGRAM_BOT_TOKEN) {
@@ -120,14 +131,34 @@ async function handleCallbackQuery(query) {
         await b.answerCallbackQuery(query.id, { text: 'Reply not available.' });
         return;
       }
+      const confirmedBody = applySignatureIfFirst(replyText, vm.source_line, vm.caller_number);
       if (config.SMS_REPLIES_ENABLED) {
-        await sendSms(vm.twilio_number, vm.caller_number, replyText);
-        db.updateVoicemail(callSid, { action_taken: 'replied', reply_sent_text: replyText, reply_sent_at: new Date().toISOString() });
+        const sent = await sendSms(vm.twilio_number, vm.caller_number, confirmedBody);
+        const sid = sent && sent.sid ? sent.sid : null;
+        db.logSmsMessage({
+          callerNumber: vm.caller_number,
+          twilioNumber: vm.twilio_number,
+          sourceLine: vm.source_line,
+          direction: 'outbound',
+          messageBody: confirmedBody,
+          twilioMessageSid: sid,
+          linkedVoicemailSid: vm.twilio_call_sid,
+        });
+        db.updateVoicemail(callSid, { action_taken: 'replied', reply_sent_text: confirmedBody, reply_sent_at: new Date().toISOString() });
         await b.answerCallbackQuery(query.id, { text: '✅ SMS sent!' });
         await b.editMessageReplyMarkup({ inline_keyboard: [] }, { chat_id: chatId, message_id: messageId });
         await b.sendMessage(chatId, `✅ Sent to ${vm.caller_number}`);
       } else {
-        db.updateVoicemail(callSid, { action_taken: 'reply_queued', reply_sent_text: replyText, reply_sent_at: new Date().toISOString() });
+        db.logSmsMessage({
+          callerNumber: vm.caller_number,
+          twilioNumber: vm.twilio_number,
+          sourceLine: vm.source_line,
+          direction: 'outbound',
+          messageBody: confirmedBody,
+          twilioMessageSid: null,
+          linkedVoicemailSid: vm.twilio_call_sid,
+        });
+        db.updateVoicemail(callSid, { action_taken: 'reply_queued', reply_sent_text: confirmedBody, reply_sent_at: new Date().toISOString() });
         await b.answerCallbackQuery(query.id, { text: 'Queued (SMS disabled)' });
         await b.editMessageReplyMarkup({ inline_keyboard: [] }, { chat_id: chatId, message_id: messageId });
         await b.sendMessage(chatId, `📋 Queued for ${vm.caller_number} when SMS enabled`);
@@ -139,6 +170,17 @@ async function handleCallbackQuery(query) {
       await b.editMessageReplyMarkup({ inline_keyboard: [] }, { chat_id: chatId, message_id: messageId });
       logger.info('Reply cancelled', { callSid: data.replace('cancelreply:', '') });
 
+    } else if (data.startsWith('edit_sms:')) {
+      const smsId = parseInt(data.replace('edit_sms:', ''));
+      const smsRow = db.getSmsById(smsId);
+      if (!smsRow) {
+        await b.answerCallbackQuery(query.id, { text: 'SMS not found.' });
+        return;
+      }
+      editSessions.set(String(chatId), { type: 'sms', id: smsId });
+      await b.answerCallbackQuery(query.id, { text: 'Type your reply...' });
+      await b.sendMessage(chatId, `✏️ *Type your reply* to ${smsRow.caller_number}:\n_(Just type it and send)_`, { parse_mode: 'Markdown' });
+
     } else if (data.startsWith('edit:')) {
       const callSid = data.replace('edit:', '');
       const vm = db.getVoicemailBySid(callSid);
@@ -147,7 +189,7 @@ async function handleCallbackQuery(query) {
         return;
       }
 
-      editSessions.set(String(chatId), callSid);
+      editSessions.set(String(chatId), { type: 'voicemail', id: callSid });
       await b.answerCallbackQuery(query.id, { text: 'Type your custom reply...' });
       await b.sendMessage(chatId, `✏️ *Type your custom reply* to ${vm.caller_number}:\n_(Just type it and send)_`, { parse_mode: 'Markdown' });
 
@@ -289,33 +331,107 @@ async function handleMessage(msg) {
 
   // Check for pending edit session
   if (editSessions.has(chatId) && text && !text.startsWith('/')) {
-    const callSid = editSessions.get(chatId);
+    const session = editSessions.get(chatId);
     editSessions.delete(chatId);
 
     const b = getBot();
+
+    // ── SMS-thread reply (edit_sms:) ──
+    if (session.type === 'sms') {
+      const smsRow = db.getSmsById(session.id);
+      if (!smsRow) {
+        await b.sendMessage(chatId, '❌ SMS not found. Discarding reply.');
+        return;
+      }
+      const outbodyRaw = text;
+      const outBody = applySignatureIfFirst(outbodyRaw, smsRow.source_line, smsRow.caller_number);
+      if (config.SMS_REPLIES_ENABLED) {
+        const sent = await sendSms(smsRow.twilio_number, smsRow.caller_number, outBody);
+        const sid = sent && sent.sid ? sent.sid : null;
+        db.logSmsMessage({
+          callerNumber: smsRow.caller_number,
+          twilioNumber: smsRow.twilio_number,
+          sourceLine: smsRow.source_line,
+          direction: 'outbound',
+          messageBody: outBody,
+          twilioMessageSid: sid,
+          linkedVoicemailSid: smsRow.linked_voicemail_sid,
+        });
+        await b.sendMessage(chatId, `✅ Reply sent to ${smsRow.caller_number}:\n\n${outBody}`);
+      } else {
+        db.logSmsMessage({
+          callerNumber: smsRow.caller_number,
+          twilioNumber: smsRow.twilio_number,
+          sourceLine: smsRow.source_line,
+          direction: 'outbound',
+          messageBody: outBody,
+          twilioMessageSid: null,
+          linkedVoicemailSid: smsRow.linked_voicemail_sid,
+        });
+        await b.sendMessage(chatId, `📋 Reply queued \\(SMS disabled\\):\n\n*To:* ${escapeMarkdown(smsRow.caller_number)}\n\n${escapeMarkdown(outBody)}`, { parse_mode: 'MarkdownV2' });
+      }
+      return;
+    }
+
+    // ── Voicemail reply (edit:) ──
+    const callSid = session.id;
     const vm = db.getVoicemailBySid(callSid);
     if (!vm) {
       await b.sendMessage(chatId, '❌ Voicemail not found. Discarding reply.');
       return;
     }
 
+    const outBodyRaw = text;
+    const outBody = applySignatureIfFirst(outBodyRaw, vm.source_line, vm.caller_number);
+
     if (config.SMS_REPLIES_ENABLED) {
-      await sendSms(vm.twilio_number, vm.caller_number, text);
+      const sent = await sendSms(vm.twilio_number, vm.caller_number, outBody);
+      const sid = sent && sent.sid ? sent.sid : null;
+      db.logSmsMessage({
+        callerNumber: vm.caller_number,
+        twilioNumber: vm.twilio_number,
+        sourceLine: vm.source_line,
+        direction: 'outbound',
+        messageBody: outBody,
+        twilioMessageSid: sid,
+        linkedVoicemailSid: vm.twilio_call_sid,
+      });
       db.updateVoicemail(callSid, {
         action_taken: 'replied',
-        reply_sent_text: text,
+        reply_sent_text: outBody,
         reply_sent_at: new Date().toISOString(),
       });
-      await b.sendMessage(chatId, `✅ Custom reply sent to ${vm.caller_number}:\n\n${text}`);
+      await b.sendMessage(chatId, `✅ Custom reply sent to ${vm.caller_number}:\n\n${outBody}`);
     } else {
+      db.logSmsMessage({
+        callerNumber: vm.caller_number,
+        twilioNumber: vm.twilio_number,
+        sourceLine: vm.source_line,
+        direction: 'outbound',
+        messageBody: outBody,
+        twilioMessageSid: null,
+        linkedVoicemailSid: vm.twilio_call_sid,
+      });
       db.updateVoicemail(callSid, {
         action_taken: 'reply_queued',
-        reply_sent_text: text,
+        reply_sent_text: outBody,
         reply_sent_at: new Date().toISOString(),
       });
-      await b.sendMessage(chatId, `📋 Custom reply queued \\(SMS disabled\\):\n\n*To:* ${escapeMarkdown(vm.caller_number)}\n\n${escapeMarkdown(text)}`, { parse_mode: 'MarkdownV2' });
+      await b.sendMessage(chatId, `📋 Custom reply queued \\(SMS disabled\\):\n\n*To:* ${escapeMarkdown(vm.caller_number)}\n\n${escapeMarkdown(outBody)}`, { parse_mode: 'MarkdownV2' });
     }
   }
+}
+
+/**
+ * applySignatureIfFirst — appends line signature to body if this is the first
+ * outbound SMS to this caller (no prior reply_sent_text on any voicemail row).
+ */
+function applySignatureIfFirst(body, sourceLine, callerNumber) {
+  if (!sourceLine) return body;
+  const alreadyReplied = db.hasRepliedBefore(callerNumber);
+  if (alreadyReplied) return body;
+  const sig = FIRST_SMS_SIGNATURES[sourceLine];
+  return sig ? body + sig : body;
 }
 
 function formatPacificTime(utcIso) {
@@ -448,29 +564,43 @@ function setupSearchHandler(b) {
     if (String(userId) !== String(config.TELEGRAM_MIKE_USER_ID)) return;
 
     const query = match[1].trim();
-    const results = db.searchVoicemails(query);
+    const vmResults = db.searchVoicemails(query);
+    const smsResults = db.searchSmsMessages(query);
 
-    if (results.length === 0) {
-      await b.sendMessage(chatId, `No voicemails found for: *${escapeMarkdown(query)}*`, { parse_mode: 'MarkdownV2' });
+    if (vmResults.length === 0 && smsResults.length === 0) {
+      await b.sendMessage(chatId, `No results found for: *${escapeMarkdown(query)}*`, { parse_mode: 'MarkdownV2' });
       return;
     }
 
-    await b.sendMessage(chatId, `🔍 Found ${results.length} voicemail${results.length !== 1 ? 's' : ''} for *${escapeMarkdown(query)}*:`, { parse_mode: 'MarkdownV2' });
-
-    for (const vm of results) {
-      const callerDisplay = vm.caller_name ? `${vm.caller_name} (${vm.caller_number})` : vm.caller_number;
-      const time = vm.timestamp_utc ? vm.timestamp_utc.substring(0, 16).replace('T', ' ') + ' UTC' : 'Unknown time';
-      const text = `📞 *${escapeMarkdown(callerDisplay)}*\n` +
-        `🕐 ${escapeMarkdown(time)}\n` +
-        `📋 ${escapeMarkdown(vm.summary || 'No summary')}`;
-      const keyboard = { inline_keyboard: [] };
-      if (vm.recording_local_path) {
-        keyboard.inline_keyboard.push([
-          { text: '🎧 Listen', callback_data: `listen:${vm.twilio_call_sid}` },
-          { text: '💾 Save Contact', callback_data: `savecontact:${vm.twilio_call_sid}` },
-        ]);
+    if (vmResults.length > 0) {
+      await b.sendMessage(chatId, `🔍 Found ${vmResults.length} voicemail${vmResults.length !== 1 ? 's' : ''} for *${escapeMarkdown(query)}*:`, { parse_mode: 'MarkdownV2' });
+      for (const vm of vmResults) {
+        const callerDisplay = vm.caller_name ? `${vm.caller_name} (${vm.caller_number})` : vm.caller_number;
+        const time = vm.timestamp_utc ? vm.timestamp_utc.substring(0, 16).replace('T', ' ') + ' UTC' : 'Unknown time';
+        const text = `📞 *${escapeMarkdown(callerDisplay)}*\n` +
+          `🕐 ${escapeMarkdown(time)}\n` +
+          `📋 ${escapeMarkdown(vm.summary || 'No summary')}`;
+        const keyboard = { inline_keyboard: [] };
+        if (vm.recording_local_path) {
+          keyboard.inline_keyboard.push([
+            { text: '🎧 Listen', callback_data: `listen:${vm.twilio_call_sid}` },
+            { text: '💾 Save Contact', callback_data: `savecontact:${vm.twilio_call_sid}` },
+          ]);
+        }
+        await b.sendMessage(chatId, text, { parse_mode: 'MarkdownV2', reply_markup: keyboard });
       }
-      await b.sendMessage(chatId, text, { parse_mode: 'MarkdownV2', reply_markup: keyboard });
+    }
+
+    if (smsResults.length > 0) {
+      await b.sendMessage(chatId, `💬 Found ${smsResults.length} SMS message${smsResults.length !== 1 ? 's' : ''} for *${escapeMarkdown(query)}*:`, { parse_mode: 'MarkdownV2' });
+      for (const sms of smsResults) {
+        const dir = sms.direction === 'inbound' ? '⬇️ In' : '⬆️ Out';
+        const time = sms.sent_at ? sms.sent_at.substring(0, 16).replace('T', ' ') + ' UTC' : 'Unknown time';
+        const text = `💬 *${escapeMarkdown(sms.caller_number)}* \u2014 ${escapeMarkdown(sms.source_line || 'unknown line')}\n` +
+          `${dir} \u00b7 ${escapeMarkdown(time)}\n` +
+          `${escapeMarkdown(sms.message_body.substring(0, 200))}${sms.message_body.length > 200 ? '\u2026' : ''}`;
+        await b.sendMessage(chatId, text, { parse_mode: 'MarkdownV2' });
+      }
     }
   });
 }
