@@ -123,6 +123,24 @@ async function handleCallbackQuery(query) {
       await b.answerCallbackQuery(query.id, { text: 'Type your custom reply...' });
       await b.sendMessage(chatId, `✏️ *Type your custom reply* to ${vm.caller_number}:\n_(Just type it and send)_`, { parse_mode: 'Markdown' });
 
+    } else if (data.startsWith('transcript:')) {
+      const callSid = data.replace('transcript:', '');
+      const vm = db.getVoicemailBySid(callSid);
+      if (!vm) {
+        await b.answerCallbackQuery(query.id, { text: 'Voicemail not found.' });
+        return;
+      }
+      if (!vm.transcript) {
+        await b.answerCallbackQuery(query.id, { text: 'No transcript available.' });
+        return;
+      }
+      await b.answerCallbackQuery(query.id, { text: '📝 Sending transcript...' });
+      const callerDisplay = vm.caller_name ? `${vm.caller_name} (${vm.caller_number})` : vm.caller_number;
+      const header = `📝 Transcript — ${callerDisplay}`;
+      // Send as plain text to avoid MarkdownV2 escaping issues with arbitrary transcript content
+      await b.sendMessage(chatId, `${header}\n\n${vm.transcript}`, { parse_mode: undefined });
+      logger.info('Transcript sent', { callSid });
+
     } else if (data.startsWith('savecontact:')) {
       const callSid = data.replace('savecontact:', '');
       const vm = db.getVoicemailBySid(callSid);
@@ -312,20 +330,29 @@ function buildVoicemailText({ callerNumber, callerName, lineLabel, timestampUtc,
 function buildButtons(callSid, smartReplies) {
   const buttons = [];
 
-  // Row 1: smart reply buttons (up to 2)
+  // Row 1: Primary actions
+  buttons.push([
+    { text: '📞 Callback', callback_data: `escalate:${callSid}` },
+    { text: '🎧 Listen', callback_data: `listen:${callSid}` },
+    { text: '📝 Transcript', callback_data: `transcript:${callSid}` },
+  ]);
+
+  // Row 2: Smart reply buttons (shown only if available)
   const replyRow = [];
   if (smartReplies[0]) replyRow.push({ text: '💬 Reply 1', callback_data: `reply:1:${callSid}` });
   if (smartReplies[1]) replyRow.push({ text: '💬 Reply 2', callback_data: `reply:2:${callSid}` });
   if (replyRow.length > 0) buttons.push(replyRow);
 
-  // Row 2: Listen + actions
+  // Row 3: Custom reply + Save Contact
   buttons.push([
-    { text: '🎧 Listen', callback_data: `listen:${callSid}` },
-    { text: '✏️ Edit', callback_data: `edit:${callSid}` },
-    { text: '🚨 Escalate', callback_data: `escalate:${callSid}` },
-    { text: '🗑️ Delete', callback_data: `delete:${callSid}` },
+    { text: '✏️ Custom', callback_data: `edit:${callSid}` },
+    { text: '👤 Save', callback_data: `savecontact:${callSid}` },
+  ]);
+
+  // Row 4: Block + Delete
+  buttons.push([
     { text: '🚫 Block', callback_data: `block:${callSid}` },
-    { text: '💾 Save Contact', callback_data: `savecontact:${callSid}` },
+    { text: '🗑️ Delete', callback_data: `delete:${callSid}` },
   ]);
 
   return { inline_keyboard: buttons };
