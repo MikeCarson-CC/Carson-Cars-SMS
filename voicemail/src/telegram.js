@@ -348,10 +348,6 @@ function buildVoicemailText({ callerNumber, callerName, lineLabel, timestampUtc,
     `*Line:* ${escapeMarkdown(lineLabel)}\n` +
     `*Time:* ${escapeMarkdown(time)}\n\n` +
     `*Summary:* ${escapeMarkdown(summary)}`;
-  if (smartReplies && smartReplies.length > 0) {
-    text += `\n\n*Reply 1:* _${escapeMarkdown(smartReplies[0])}_`;
-    if (smartReplies[1]) text += `\n*Reply 2:* _${escapeMarkdown(smartReplies[1])}_`;
-  }
   return text;
 }
 
