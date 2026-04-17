@@ -122,6 +122,25 @@ async function handleCallbackQuery(query) {
       await b.answerCallbackQuery(query.id, { text: 'Type your custom reply...' });
       await b.sendMessage(chatId, `✏️ *Type your custom reply* to ${vm.caller_number}:\n_(Just type it and send)_`, { parse_mode: 'Markdown' });
 
+    } else if (data.startsWith('listen:')) {
+      const callSid = data.replace('listen:', '');
+      const vm = db.getVoicemailBySid(callSid);
+      if (!vm) {
+        await b.answerCallbackQuery(query.id, { text: 'Recording not found.' });
+        return;
+      }
+      const fs = require('fs');
+      const localPath = vm.recording_local_path;
+      if (!localPath || !fs.existsSync(localPath)) {
+        await b.answerCallbackQuery(query.id, { text: 'Recording file not available.' });
+        return;
+      }
+      await b.answerCallbackQuery(query.id, { text: '🎧 Sending audio...' });
+      await b.sendVoice(chatId, fs.createReadStream(localPath), {
+        caption: `Voicemail from ${vm.caller_number} — ${vm.source_line}`,
+      });
+      logger.info('Listen: sent recording', { callSid, chatId });
+
     } else if (data.startsWith('escalate:')) {
       const callSid = data.replace('escalate:', '');
       db.updateVoicemail(callSid, { action_taken: 'escalated' });
@@ -202,14 +221,19 @@ function escapeMarkdown(str) {
   return String(str).replace(/([_*\[\]()~`>#+\-=|{}.!\\])/g, '\\$1');
 }
 
-function buildVoicemailText({ callerNumber, callerName, lineLabel, timestampUtc, summary }) {
+function buildVoicemailText({ callerNumber, callerName, lineLabel, timestampUtc, summary, smartReplies }) {
   const time = formatPacificTime(timestampUtc);
   const callerDisplay = callerName ? `${callerName} (${callerNumber})` : callerNumber;
-  return `📞 *New Voicemail*\n\n` +
+  let text = `📞 *New Voicemail*\n\n` +
     `*From:* ${escapeMarkdown(callerDisplay)}\n` +
     `*Line:* ${escapeMarkdown(lineLabel)}\n` +
     `*Time:* ${escapeMarkdown(time)}\n\n` +
     `*Summary:* ${escapeMarkdown(summary)}`;
+  if (smartReplies && smartReplies.length > 0) {
+    text += `\n\n*Reply 1:* _${escapeMarkdown(smartReplies[0])}_`;
+    if (smartReplies[1]) text += `\n*Reply 2:* _${escapeMarkdown(smartReplies[1])}_`;
+  }
+  return text;
 }
 
 function buildButtons(callSid, smartReplies) {
@@ -221,8 +245,9 @@ function buildButtons(callSid, smartReplies) {
   if (smartReplies[1]) replyRow.push({ text: '💬 Reply 2', callback_data: `reply:2:${callSid}` });
   if (replyRow.length > 0) buttons.push(replyRow);
 
-  // Row 2: actions
+  // Row 2: Listen + actions
   buttons.push([
+    { text: '🎧 Listen', callback_data: `listen:${callSid}` },
     { text: '✏️ Edit', callback_data: `edit:${callSid}` },
     { text: '🚨 Escalate', callback_data: `escalate:${callSid}` },
     { text: '🗑️ Delete', callback_data: `delete:${callSid}` },
@@ -238,7 +263,7 @@ async function sendVoicemailCard({ callSid, callerNumber, callerName, sourceLine
     return null;
   }
 
-  const text = buildVoicemailText({ callerNumber, callerName, lineLabel, timestampUtc, summary });
+  const text = buildVoicemailText({ callerNumber, callerName, lineLabel, timestampUtc, summary, smartReplies });
   const keyboard = buildButtons(callSid, smartReplies);
 
   const sent = await b.sendMessage(config.TELEGRAM_MIKE_USER_ID, text, {
