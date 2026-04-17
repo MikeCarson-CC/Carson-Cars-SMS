@@ -57,6 +57,23 @@ function initSchema() {
     CREATE INDEX IF NOT EXISTS idx_voicemails_category ON voicemails(category);
     CREATE INDEX IF NOT EXISTS idx_voicemails_created_at ON voicemails(created_at);
     CREATE INDEX IF NOT EXISTS idx_voicemails_action_taken ON voicemails(action_taken);
+
+    CREATE TABLE IF NOT EXISTS sms_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      caller_number TEXT NOT NULL,
+      twilio_number TEXT NOT NULL,
+      source_line TEXT,
+      direction TEXT NOT NULL,
+      message_body TEXT NOT NULL,
+      twilio_message_sid TEXT,
+      sent_at TEXT DEFAULT (datetime('now')),
+      linked_voicemail_sid TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_sms_caller_number ON sms_messages(caller_number);
+    CREATE INDEX IF NOT EXISTS idx_sms_sent_at ON sms_messages(sent_at);
+    CREATE INDEX IF NOT EXISTS idx_sms_direction ON sms_messages(direction);
   `);
 }
 
@@ -171,6 +188,83 @@ function deleteVoicemailRecord(callSid) {
   d.prepare('DELETE FROM voicemails WHERE twilio_call_sid = ?').run(callSid);
 }
 
+// ─── SMS Messages ─────────────────────────────────────────────────────────────
+
+/**
+ * hasRepliedBefore — returns true if any voicemail from this caller has a reply_sent_text.
+ */
+function hasRepliedBefore(callerNumber) {
+  const d = getDb();
+  const row = d.prepare(
+    `SELECT 1 FROM voicemails WHERE caller_number = ? AND reply_sent_text IS NOT NULL LIMIT 1`
+  ).get(callerNumber);
+  return !!row;
+}
+
+/**
+ * logSmsMessage — inserts a row into sms_messages and returns the new row id.
+ */
+function logSmsMessage({ callerNumber, twilioNumber, sourceLine, direction, messageBody, twilioMessageSid, linkedVoicemailSid }) {
+  const d = getDb();
+  const result = d.prepare(`
+    INSERT INTO sms_messages
+      (caller_number, twilio_number, source_line, direction, message_body, twilio_message_sid, linked_voicemail_sid)
+    VALUES
+      (@callerNumber, @twilioNumber, @sourceLine, @direction, @messageBody, @twilioMessageSid, @linkedVoicemailSid)
+  `).run({ callerNumber, twilioNumber, sourceLine: sourceLine || null, direction, messageBody, twilioMessageSid: twilioMessageSid || null, linkedVoicemailSid: linkedVoicemailSid || null });
+  return result.lastInsertRowid;
+}
+
+/**
+ * getSmsById — fetches a single sms_messages row by id.
+ */
+function getSmsById(id) {
+  const d = getDb();
+  return d.prepare('SELECT * FROM sms_messages WHERE id = ?').get(id);
+}
+
+/**
+ * getSmsHistory — all messages for a caller, oldest first.
+ */
+function getSmsHistory(callerNumber) {
+  const d = getDb();
+  return d.prepare(
+    `SELECT * FROM sms_messages WHERE caller_number = ? ORDER BY sent_at ASC`
+  ).all(callerNumber);
+}
+
+/**
+ * searchSmsMessages — searches caller_number and message_body, returns 10 most recent.
+ */
+function searchSmsMessages(query) {
+  const d = getDb();
+  const q = '%' + query + '%';
+  return d.prepare(`
+    SELECT * FROM sms_messages
+    WHERE caller_number LIKE ? OR message_body LIKE ?
+    ORDER BY sent_at DESC
+    LIMIT 10
+  `).all(q, q);
+}
+
+/**
+ * getExpiredSmsMessages — SMS rows older than 48 months.
+ */
+function getExpiredSmsMessages() {
+  const d = getDb();
+  return d.prepare(
+    `SELECT id FROM sms_messages WHERE created_at < datetime('now', '-48 months')`
+  ).all();
+}
+
+/**
+ * deleteSmsMessage — delete a single sms_messages row by id.
+ */
+function deleteSmsMessage(id) {
+  const d = getDb();
+  d.prepare('DELETE FROM sms_messages WHERE id = ?').run(id);
+}
+
 module.exports = {
   getDb,
   isBlocked,
@@ -187,4 +281,11 @@ module.exports = {
   getVoicemailById,
   getYesterdayVoicemails,
   getPendingVoicemails,
+  hasRepliedBefore,
+  logSmsMessage,
+  getSmsById,
+  getSmsHistory,
+  searchSmsMessages,
+  getExpiredSmsMessages,
+  deleteSmsMessage,
 };
