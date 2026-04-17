@@ -122,6 +122,32 @@ async function handleCallbackQuery(query) {
       await b.answerCallbackQuery(query.id, { text: 'Type your custom reply...' });
       await b.sendMessage(chatId, `✏️ *Type your custom reply* to ${vm.caller_number}:\n_(Just type it and send)_`, { parse_mode: 'Markdown' });
 
+    } else if (data.startsWith('notspam:')) {
+      const callSid = data.replace('notspam:', '');
+      const vm = db.getVoicemailBySid(callSid);
+      if (!vm) {
+        await b.answerCallbackQuery(query.id, { text: 'Voicemail not found.' });
+        return;
+      }
+      // Re-classify as real and send full card
+      db.updateVoicemail(callSid, { category: 'real', action_taken: 'pending' });
+      await b.answerCallbackQuery(query.id, { text: 'Marked as real — sending card...' });
+      await b.editMessageReplyMarkup({ inline_keyboard: [] }, { chat_id: chatId, message_id: messageId });
+      const smartReplies = JSON.parse(vm.smart_replies_json || '[]');
+      const lineConfig = require('./config').getLineByName(vm.source_line);
+      const lineLabel = lineConfig ? lineConfig.label : vm.source_line;
+      await sendVoicemailCard({
+        callSid: vm.twilio_call_sid,
+        callerNumber: vm.caller_number,
+        callerName: vm.caller_name,
+        sourceLine: vm.source_line,
+        lineLabel,
+        timestampUtc: vm.timestamp_utc,
+        summary: vm.summary,
+        smartReplies,
+      });
+      logger.info('Not-spam override: resurfaced card', { callSid });
+
     } else if (data.startsWith('listen:')) {
       const callSid = data.replace('listen:', '');
       const vm = db.getVoicemailBySid(callSid);

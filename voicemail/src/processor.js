@@ -141,6 +141,27 @@ async function processRecording({ callSid, recordingUrl, sourceLine, twilioNumbe
     if (analysis.category === 'spam' || analysis.category === 'robocall') {
       db.updateVoicemail(callSid, { action_taken: 'auto_dismissed' });
       logger.info('Auto-dismissed spam/robocall', { callSid, category: analysis.category });
+      // Send brief Telegram notification with Not Spam override button
+      try {
+        const bot = telegram.getBot();
+        if (bot) {
+          const callerDisplay = callerName ? `${callerName} (${callerNumber})` : callerNumber;
+          const icon = analysis.category === 'robocall' ? '🤖' : '🗑️';
+          await bot.sendMessage(config.TELEGRAM_MIKE_USER_ID,
+            `${icon} Auto\-dismissed: ${escapeMarkdownV2(callerDisplay)} \— ${escapeMarkdownV2(analysis.summary)}`,
+            {
+              parse_mode: 'MarkdownV2',
+              reply_markup: {
+                inline_keyboard: [[
+                  { text: '⚠️ Not Spam — Review', callback_data: `notspam:${callSid}` }
+                ]]
+              }
+            }
+          );
+        }
+      } catch (notifyErr) {
+        logger.warn('Failed to send spam notification', { callSid, error: notifyErr.message });
+      }
       return;
     }
 
