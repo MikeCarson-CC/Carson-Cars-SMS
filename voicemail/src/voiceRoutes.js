@@ -3,6 +3,7 @@
 const express = require('express');
 const router = express.Router();
 const VoiceResponse = require('twilio').twiml.VoiceResponse;
+const MessagingResponse = require('twilio').twiml.MessagingResponse;
 const config = require('./config');
 const logger = require('./logger');
 const db = require('./db');
@@ -131,5 +132,79 @@ router.post('/recording', async (req, res) => {
     logger.error('Error handling recording callback', { error: err.message, stack: err.stack });
   }
 });
+
+// POST /sms/incoming — Twilio hits this when an inbound SMS arrives on any of the 6 numbers
+router.post('/sms/incoming', async (req, res) => {
+  // Always respond immediately with empty TwiML so Twilio doesn't retry
+  const twiml = new MessagingResponse();
+  res.type('text/xml');
+  res.send(twiml.toString());
+
+  try {
+    const from = req.body.From || '';   // Sender’s number
+    const to   = req.body.To   || '';   // Our Twilio number
+    const body = req.body.Body || '';
+    const smsSid = req.body.MessageSid || req.body.SmsSid || '';
+
+    // Identify source line from the Twilio number that received the SMS
+    const line = config.getLineByNumber(to);
+    const sourceLine  = line ? line.name  : 'unknown';
+    const lineLabel   = line ? line.label : to;
+
+    logger.info('Inbound SMS', { from, to, sourceLine, smsSid, bodyLength: body.length });
+
+    // Reject SMS from blocked numbers silently
+    if (from && db.isBlocked(from)) {
+      logger.info('Inbound SMS from blocked number — ignoring', { from });
+      return;
+    }
+
+    // Find the most recent voicemail from this caller (nullable)
+    const d = db.getDb();
+    const recentVm = d.prepare(
+      `SELECT twilio_call_sid FROM voicemails WHERE caller_number = ? ORDER BY created_at DESC LIMIT 1`
+    ).get(from);
+    const linkedSid = recentVm ? recentVm.twilio_call_sid : null;
+
+    // Log inbound SMS to sms_messages
+    const smsId = db.logSmsMessage({
+      callerNumber: from,
+      twilioNumber: to,
+      sourceLine,
+      direction: 'inbound',
+      messageBody: body,
+      twilioMessageSid: smsSid,
+      linkedVoicemailSid: linkedSid,
+    });
+
+    // Send Telegram notification to Mike
+    const telegram = require('./telegram');
+    const b = telegram.getBot();
+    if (b) {
+      const preview = body.length > 300 ? body.substring(0, 300) + '…' : body;
+      const tgText = `💬 *Text from* ${escapeMarkdown(from)} \u2014 ${escapeMarkdown(lineLabel)}\n\n${escapeMarkdown(preview)}`;
+      const keyboard = {
+        inline_keyboard: [[
+          { text: '💬 Reply', callback_data: `edit_sms:${smsId}` },
+        ]]
+      };
+      await b.sendMessage(config.TELEGRAM_MIKE_USER_ID, tgText, {
+        parse_mode: 'MarkdownV2',
+        reply_markup: keyboard,
+      });
+      logger.info('Inbound SMS Telegram notification sent', { from, smsId });
+    } else {
+      logger.warn('Telegram bot not available — inbound SMS notification skipped', { from, smsId });
+    }
+  } catch (err) {
+    logger.error('Error handling inbound SMS', { error: err.message, stack: err.stack });
+  }
+});
+
+// Shared MarkdownV2 escape helper (same as telegram.js)
+function escapeMarkdown(str) {
+  if (!str) return '';
+  return String(str).replace(/([_*\[\]()~`>#+\-=|{}.!\\])/g, '\\$1');
+}
 
 module.exports = router;

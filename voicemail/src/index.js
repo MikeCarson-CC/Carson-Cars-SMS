@@ -59,8 +59,9 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Twilio voice webhooks
+// Twilio voice + SMS webhooks
 app.use('/voice', voiceRoutes);
+app.use('/sms', voiceRoutes);  // /sms/incoming served from same router
 
 // Telegram webhook endpoint (receives updates from Telegram)
 app.post('/telegram/webhook', async (req, res) => {
@@ -151,7 +152,18 @@ cron.schedule('0 2 * * 0', () => {
       db.deleteVoicemailRecord(vm.twilio_call_sid);
       deleted++;
     }
-    logger.info('Weekly cleanup complete', { deleted, checked: expired.length });
+    // Also purge expired SMS messages (48 months)
+    const expiredSms = db.getExpiredSmsMessages();
+    let deletedSms = 0;
+    for (const row of expiredSms) {
+      db.deleteSmsMessage(row.id);
+      deletedSms++;
+    }
+    if (deletedSms > 0) {
+      logger.info('Weekly cleanup: SMS messages purged', { deletedSms });
+    }
+
+    logger.info('Weekly cleanup complete', { deleted, checked: expired.length, deletedSms });
     if (deleted > 0) {
       const tg = require('./telegram');
       const bot = tg.getBot();
