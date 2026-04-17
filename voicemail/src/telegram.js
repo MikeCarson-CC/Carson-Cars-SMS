@@ -340,7 +340,7 @@ function escapeMarkdown(str) {
   return String(str).replace(/([_*\[\]()~`>#+\-=|{}.!\\])/g, '\\$1');
 }
 
-function buildVoicemailText({ callerNumber, callerName, lineLabel, timestampUtc, summary, smartReplies }) {
+function buildVoicemailText({ callerNumber, callerName, lineLabel, timestampUtc, summary }) {
   const time = formatPacificTime(timestampUtc);
   const callerDisplay = callerName ? `${callerName} (${callerNumber})` : callerNumber;
   let text = `📞 *New Voicemail*\n\n` +
@@ -355,30 +355,22 @@ function buildVoicemailText({ callerNumber, callerName, lineLabel, timestampUtc,
   return text;
 }
 
-function buildButtons(callSid, smartReplies) {
-  // Smart replies stored in DB but not shown in card — custom reply only
-  const buttons = [];
-
-  // Row 1: Listen | Transcript | Save
-  buttons.push([
-    { text: '🎧 Listen', callback_data: `listen:${callSid}` },
-    { text: '📝 Transcript', callback_data: `transcript:${callSid}` },
-    { text: '👤 Save', callback_data: `savecontact:${callSid}` },
-  ]);
-
-  // Row 2: Reply (custom) | Callback
-  buttons.push([
-    { text: '💬 Reply', callback_data: `edit:${callSid}` },
-    { text: '📞 Callback', callback_data: `escalate:${callSid}` },
-  ]);
-
-  // Row 3: Block | Delete
-  buttons.push([
-    { text: '🚫 Block', callback_data: `block:${callSid}` },
-    { text: '🗑️ Delete', callback_data: `delete:${callSid}` },
-  ]);
-
-  return { inline_keyboard: buttons };
+function buildButtons(callSid) {
+  return {
+    inline_keyboard: [
+      // Row 1: primary actions
+      [
+        { text: '🎧 Listen', callback_data: `listen:${callSid}` },
+        { text: '📝 Transcript', callback_data: `transcript:${callSid}` },
+        { text: '💬 Reply', callback_data: `edit:${callSid}` },
+      ],
+      // Row 2: flag + block
+      [
+        { text: '📞 Callback', callback_data: `escalate:${callSid}` },
+        { text: '🚫 Block', callback_data: `block:${callSid}` },
+      ],
+    ]
+  };
 }
 
 async function sendVoicemailCard({ callSid, callerNumber, callerName, sourceLine, lineLabel, timestampUtc, summary, smartReplies }) {
@@ -388,8 +380,8 @@ async function sendVoicemailCard({ callSid, callerNumber, callerName, sourceLine
     return null;
   }
 
-  const text = buildVoicemailText({ callerNumber, callerName, lineLabel, timestampUtc, summary, smartReplies });
-  const keyboard = buildButtons(callSid, smartReplies);
+  const text = buildVoicemailText({ callerNumber, callerName, lineLabel, timestampUtc, summary });
+  const keyboard = buildButtons(callSid);
 
   const sent = await b.sendMessage(config.TELEGRAM_MIKE_USER_ID, text, {
     parse_mode: 'MarkdownV2',
