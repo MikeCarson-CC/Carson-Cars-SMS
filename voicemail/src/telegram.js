@@ -90,26 +90,54 @@ async function handleCallbackQuery(query) {
         return;
       }
 
+      // Show confirmation step — don't clear buttons or send yet
+      // Post the reply text so Mike can read it, with a Send Confirm button
+      await b.answerCallbackQuery(query.id, { text: '👇 Review reply below' });
+      const confirmKeyboard = {
+        inline_keyboard: [[
+          { text: '✅ Confirm Send', callback_data: `confirmsend:${callSid}:${replyIndex}` },
+          { text: '❌ Cancel', callback_data: `cancelreply:${callSid}` },
+        ]]
+      };
+      const statusLabel = config.SMS_REPLIES_ENABLED ? 'Will send via SMS' : '⚠️ SMS disabled — will queue';
+      await b.sendMessage(chatId,
+        `📤 *${statusLabel}*\n\n*To:* ${escapeMarkdown(vm.caller_number)}\n\n${escapeMarkdown(replyText)}`,
+        { parse_mode: 'MarkdownV2', reply_markup: confirmKeyboard }
+      );
+
+    } else if (data.startsWith('confirmsend:')) {
+      const parts = data.replace('confirmsend:', '').split(':');
+      const callSid = parts[0];
+      const replyIndex = parseInt(parts[1]) - 1;
+      const vm = db.getVoicemailBySid(callSid);
+      if (!vm) {
+        await b.answerCallbackQuery(query.id, { text: 'Voicemail not found.' });
+        return;
+      }
+      const replies = JSON.parse(vm.smart_replies_json || '[]');
+      const replyText = replies[replyIndex];
+      if (!replyText) {
+        await b.answerCallbackQuery(query.id, { text: 'Reply not available.' });
+        return;
+      }
       if (config.SMS_REPLIES_ENABLED) {
         await sendSms(vm.twilio_number, vm.caller_number, replyText);
-        db.updateVoicemail(callSid, {
-          action_taken: 'replied',
-          reply_sent_text: replyText,
-          reply_sent_at: new Date().toISOString(),
-        });
+        db.updateVoicemail(callSid, { action_taken: 'replied', reply_sent_text: replyText, reply_sent_at: new Date().toISOString() });
         await b.answerCallbackQuery(query.id, { text: '✅ SMS sent!' });
         await b.editMessageReplyMarkup({ inline_keyboard: [] }, { chat_id: chatId, message_id: messageId });
-        await b.sendMessage(chatId, `✅ Replied to ${vm.caller_number}:\n\n${replyText}`);
+        await b.sendMessage(chatId, `✅ Sent to ${vm.caller_number}`);
       } else {
-        db.updateVoicemail(callSid, {
-          action_taken: 'reply_queued',
-          reply_sent_text: replyText,
-          reply_sent_at: new Date().toISOString(),
-        });
-        await b.answerCallbackQuery(query.id, { text: 'SMS queued (sends disabled)' });
+        db.updateVoicemail(callSid, { action_taken: 'reply_queued', reply_sent_text: replyText, reply_sent_at: new Date().toISOString() });
+        await b.answerCallbackQuery(query.id, { text: 'Queued (SMS disabled)' });
         await b.editMessageReplyMarkup({ inline_keyboard: [] }, { chat_id: chatId, message_id: messageId });
-        await b.sendMessage(chatId, `📋 SMS reply queued \\(SMS\\_REPLIES\\_ENABLED=false\\):\n\n*To:* ${escapeMarkdown(vm.caller_number)}\n*From:* ${escapeMarkdown(vm.twilio_number)}\n\n${escapeMarkdown(replyText)}`, { parse_mode: 'MarkdownV2' });
+        await b.sendMessage(chatId, `📋 Queued for ${vm.caller_number} when SMS enabled`);
       }
+      logger.info('Reply confirmed', { callSid, replyIndex, smsEnabled: config.SMS_REPLIES_ENABLED });
+
+    } else if (data.startsWith('cancelreply:')) {
+      await b.answerCallbackQuery(query.id, { text: 'Cancelled' });
+      await b.editMessageReplyMarkup({ inline_keyboard: [] }, { chat_id: chatId, message_id: messageId });
+      logger.info('Reply cancelled', { callSid: data.replace('cancelreply:', '') });
 
     } else if (data.startsWith('edit:')) {
       const callSid = data.replace('edit:', '');
